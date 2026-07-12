@@ -23,14 +23,14 @@ function DevelopLogic.processPhoto(catalog, photo, offset)
         return false
     end
 
-    catalog:withWriteAccessDo('Auto Tone + Exposure Offset', function()
+    local status = catalog:withWriteAccessDo('Auto Tone + Exposure Offset', function()
         photo:applyDevelopPreset(getAutoTonePreset(), _PLUGIN)
         if offset ~= 0 then
             photo:quickDevelopAdjustImage('Exposure', offset)
         end
     end, { timeout = 15 })
 
-    return true
+    return status == 'executed'
 end
 
 return DevelopLogic
