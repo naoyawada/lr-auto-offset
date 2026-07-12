@@ -40,6 +40,20 @@ check("rejects empty string", n4, nil)
 local n5 = Helpers.parseOffset(nil)
 check("rejects nil", n5, nil)
 
+local n6, err6 = Helpers.parseOffset("nan")
+check("rejects nan", n6, nil)
+check("nan has error message", type(err6), "string")
+
+local n7, err7 = Helpers.parseOffset("NaN")
+check("rejects NaN", n7, nil)
+check("NaN has error message", type(err7), "string")
+
+-- Lightroom embeds Lua 5.1, where tonumber("nan") yields a real NaN
+-- (Lua 5.3+ rejects the string, so exercise the guard with a NaN value).
+local n8, err8 = Helpers.parseOffset(0 / 0)
+check("rejects NaN value", n8, nil)
+check("NaN value has error message", type(err8), "string")
+
 -- formatSummary
 check("plural summary", Helpers.formatSummary(42, 0), "42 photos processed")
 check("singular summary", Helpers.formatSummary(1, 0), "1 photo processed")
