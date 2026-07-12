@@ -8,6 +8,10 @@ return {
             title = 'Auto Tone + Exposure Offset…',
             file = 'AutoOffsetMenuItem.lua',
         },
+        {
+            title = 'Auto Offset Diagnostic (temporary)',
+            file = 'Diagnostic.lua',
+        },
     },
     VERSION = { major = 0, minor = 1, revision = 0 },
 }

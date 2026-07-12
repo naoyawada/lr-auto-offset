@@ -6,7 +6,7 @@ local DevelopLogic = {}
 -- (same as the Develop module's Auto button) when the preset is applied.
 local autoTonePreset
 
-local function getAutoTonePreset()
+function DevelopLogic.getAutoTonePreset()
     if autoTonePreset == nil then
         autoTonePreset = LrApplication.addDevelopPresetForPlugin(
             _PLUGIN, 'Auto Tone (lr-auto-offset)', { AutoTone = true })
@@ -24,7 +24,7 @@ function DevelopLogic.processPhoto(catalog, photo, offset)
     end
 
     local status = catalog:withWriteAccessDo('Auto Tone + Exposure Offset', function()
-        photo:applyDevelopPreset(getAutoTonePreset(), _PLUGIN)
+        photo:applyDevelopPreset(DevelopLogic.getAutoTonePreset(), _PLUGIN)
         if offset ~= 0 then
             photo:quickDevelopAdjustImage('Exposure', offset)
         end
