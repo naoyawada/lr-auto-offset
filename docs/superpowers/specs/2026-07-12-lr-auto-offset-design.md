@@ -47,19 +47,49 @@ its develop history and can be undone or reset individually afterward.
 
 ## How it works internally
 
-Per photo, inside a catalog write transaction (`catalog:withWriteAccessDo`):
+*(Revised 2026-07-12 after in-Lightroom debugging — see "Field findings"
+below for why the original single-transaction relative-adjust design was
+unworkable.)*
 
-1. **Auto Tone** — applied via a develop preset carrying the `AutoTone`
-   flag, created with `LrApplication.addDevelopPresetForPlugin` and applied
-   with `photo:applyDevelopPreset`. This is the SDK-sanctioned way to
-   batch-apply Auto from the Library module; it uses the same algorithm as
-   the Develop module's Auto button.
-2. **Relative offset** — `photo:quickDevelopAdjustImage("Exposure", offset)`,
-   which adjusts exposure *relative* to the photo's current value (i.e., on
-   top of what Auto chose) — exactly mirroring the manual workflow.
+Two passes over the selection, each SDK call in its own write transaction:
 
-Progress is reported via `LrProgressScope` with cancellation support. The
-last-used offset is stored via `LrPrefs.prefsForPlugin()`.
+1. **Pass 1 — queue Auto Tone on every photo** via a develop preset carrying
+   the `AutoTone` flag (`LrApplication.addDevelopPresetForPlugin` +
+   `photo:applyDevelopPreset`). Lightroom writes a `-999999` placeholder
+   into `Exposure2012` and computes the real auto values asynchronously in
+   the background — queuing all photos first lets those computations run
+   concurrently.
+2. **Pass 2 — per photo: wait for the placeholder to resolve** into a real
+   exposure (polling `photo:getDevelopSettings()`, requesting a thumbnail
+   render halfway through the wait to force computation; 10 s timeout →
+   photo counted as skipped), **then write the exposure absolutely**:
+   `photo:applyDevelopSettings({ Exposure2012 = resolvedAuto + offset })`.
+
+Because each photo gets two write transactions ("Auto Tone" then "Exposure
+Offset"), each photo has **two** develop-history steps rather than the one
+originally specified — a deliberate trade forced by the async Auto
+computation; both steps are individually undoable.
+
+Progress is reported via `LrProgressScope` (spanning both passes) with
+cancellation support. The last-used offset is stored via
+`LrPrefs.prefsForPlugin()`.
+
+## Field findings (2026-07-12, Lightroom Classic v13)
+
+Discovered via step-by-step diagnostics on a real catalog; these invalidated
+the original mechanism and are worth remembering for any LR plugin work:
+
+- **Auto Tone is asynchronous.** Applying a preset with `AutoTone = true`
+  stores `Exposure2012 = -999999` as a "pending" sentinel; the real value
+  appears ~1 s later (or when the photo is next rendered). Anything that
+  reads or adjusts exposure in the same transaction operates on the
+  placeholder and is overwritten when Auto resolves.
+- **`quickDevelopAdjustImage("Exposure", n)` does not apply `n` stops.**
+  Measured: `+0.5` moved exposure by `+0.01` (≈ n/50), on a clean photo with
+  no auto involved — contrary to the SDK documentation. The API was dropped
+  entirely in favor of absolute `applyDevelopSettings` writes.
+- `photo:requestJpegThumbnail(...)` reliably forces the develop engine to
+  compute pending auto settings when idle waiting doesn't.
 
 ## Structure
 

@@ -8,6 +8,10 @@ local Dialog = require 'Dialog'
 local DevelopLogic = require 'DevelopLogic'
 local Helpers = require 'Helpers'
 
+-- How long to wait (per photo) for Lightroom to resolve the Auto Tone
+-- placeholder before giving up and counting the photo as skipped.
+local RESOLVE_TIMEOUT_SECONDS = 10
+
 LrFunctionContext.postAsyncTaskWithContext('autoOffset', function(context)
     local catalog = LrApplication.activeCatalog()
     -- getTargetPhotos() falls back to the whole filmstrip when nothing is
@@ -32,18 +36,54 @@ LrFunctionContext.postAsyncTaskWithContext('autoOffset', function(context)
     }
     progress:setCancelable(true)
 
-    local processed, skipped = 0, 0
-    for i, photo in ipairs(photos) do
+    -- Two passes: queue every Auto Tone first (Lightroom computes them
+    -- concurrently in the background), then resolve + write each offset.
+    -- Progress spans both passes.
+    local totalSteps = #photos * 2
+    local step = 0
+
+    -- Pass 1: queue Auto Tone on every photo.
+    local queued, skipped = {}, 0
+    for _, photo in ipairs(photos) do
         if progress:isCanceled() then
             break
         end
-        local ok, result = LrTasks.pcall(DevelopLogic.processPhoto, catalog, photo, offset)
-        if ok and result then
-            processed = processed + 1
+        local ok, applied = LrTasks.pcall(DevelopLogic.applyAutoTone, catalog, photo)
+        if ok and applied then
+            queued[#queued + 1] = photo
         else
             skipped = skipped + 1
         end
-        progress:setPortionComplete(i, #photos)
+        step = step + 1
+        progress:setPortionComplete(step, totalSteps)
+        LrTasks.yield()
+    end
+
+    -- Pass 2: wait for each photo's auto to resolve, then write auto + offset.
+    local processed = 0
+    for _, photo in ipairs(queued) do
+        if progress:isCanceled() then
+            break
+        end
+        local ok, autoValue = LrTasks.pcall(
+            DevelopLogic.waitForAutoExposure, photo, RESOLVE_TIMEOUT_SECONDS)
+        if ok and autoValue ~= nil then
+            local written = true
+            if offset ~= 0 then
+                local ok2, result = LrTasks.pcall(
+                    DevelopLogic.applyExposure, catalog, photo, autoValue + offset)
+                written = ok2 == true and result == true
+            end
+            if written then
+                processed = processed + 1
+            else
+                skipped = skipped + 1
+            end
+        else
+            skipped = skipped + 1
+        end
+        step = step + 1
+        progress:setPortionComplete(step, totalSteps)
         LrTasks.yield()
     end
     progress:done()

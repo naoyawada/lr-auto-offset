@@ -54,6 +54,16 @@ local n8, err8 = Helpers.parseOffset(0 / 0)
 check("rejects NaN value", n8, nil)
 check("NaN value has error message", type(err8), "string")
 
+-- isResolvedExposure: true only for real, resolved exposure values
+check("resolved zero", Helpers.isResolvedExposure(0), true)
+check("resolved negative", Helpers.isResolvedExposure(-0.17), true)
+check("resolved positive", Helpers.isResolvedExposure(0.33), true)
+check("rejects auto-pending sentinel", Helpers.isResolvedExposure(-999999), false)
+check("rejects positive sentinel-scale value", Helpers.isResolvedExposure(999999), false)
+check("rejects nil exposure", Helpers.isResolvedExposure(nil), false)
+check("rejects NaN exposure", Helpers.isResolvedExposure(0 / 0), false)
+check("rejects non-number exposure", Helpers.isResolvedExposure("0.5"), false)
+
 -- formatSummary
 check("plural summary", Helpers.formatSummary(42, 0), "42 photos processed")
 check("singular summary", Helpers.formatSummary(1, 0), "1 photo processed")

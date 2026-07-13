@@ -20,6 +20,13 @@ function Helpers.parseOffset(text)
     return n
 end
 
+-- Lightroom stores -999999 in Exposure2012 as a placeholder while it
+-- computes Auto Tone asynchronously. True only when v is a real, resolved
+-- exposure value (any sane exposure is within a few stops of zero).
+function Helpers.isResolvedExposure(v)
+    return type(v) == "number" and v == v and v > -100 and v < 100
+end
+
 -- Builds the end-of-run summary line, e.g. "40 photos processed, 2 skipped".
 function Helpers.formatSummary(processed, skipped)
     local summary = string.format("%d photo%s processed",
