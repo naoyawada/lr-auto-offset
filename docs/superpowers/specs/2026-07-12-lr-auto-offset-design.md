@@ -62,8 +62,14 @@ Two passes over the selection, each SDK call in its own write transaction:
 2. **Pass 2 — per photo: wait for the placeholder to resolve** into a real
    exposure (polling `photo:getDevelopSettings()`, requesting a thumbnail
    render halfway through the wait to force computation; 10 s timeout →
-   photo counted as skipped), **then write the exposure absolutely**:
-   `photo:applyDevelopSettings({ Exposure2012 = resolvedAuto + offset })`.
+   photo reported as "left with Auto Tone only"), **then write the exposure
+   absolutely**: `photo:applyDevelopSettings({ Exposure2012 = resolvedAuto +
+   offset })`. A zero offset skips pass 2's wait-and-write entirely.
+
+The summary reports three outcome buckets: **processed** (Auto + offset
+fully applied), **skipped** (strictly untouched — videos, write-gate
+failures), and **left with Auto Tone only** (Auto applied but the offset
+never written: canceled mid-run, resolution timeout, or write failure).
 
 Because each photo gets two write transactions ("Auto Tone" then "Exposure
 Offset"), each photo has **two** develop-history steps rather than the one

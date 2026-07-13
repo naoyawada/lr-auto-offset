@@ -63,6 +63,13 @@ LrFunctionContext.postAsyncTaskWithContext('autoOffset', function(context)
         LrTasks.yield()
     end
 
+    -- A pass-1 cancel leaves the remaining photos unreached (untouched):
+    -- count them as skipped so the summary always accounts for the whole
+    -- selection.
+    if progress:isCanceled() then
+        skipped = skipped + (#photos - step)
+    end
+
     -- Photos skipped (or never reached) in pass 1 take no pass-2 step;
     -- shrink the denominator so the bar can reach 100%.
     totalSteps = step + #queued
