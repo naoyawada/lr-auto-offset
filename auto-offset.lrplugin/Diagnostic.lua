@@ -1,7 +1,11 @@
--- TEMPORARY diagnostic v2 for the auto+offset ordering bug. Finding from v1:
--- applying the AutoTone preset stores Exposure2012 = -999999, a placeholder
--- Lightroom resolves asynchronously. v2 waits for the placeholder to resolve
--- into a real value BEFORE applying the offset, forcing a render if needed.
+-- TEMPORARY diagnostic v3. Findings so far:
+--   v1: AutoTone preset stores Exposure2012 = -999999 placeholder, resolved async.
+--   v2: after resolution (-0.17), quickDevelopAdjustImage('Exposure', 0.5)
+--       moved exposure only +0.01 -- likely a no-op (drift = auto refinement).
+-- v3 runs two isolated experiments on a RESET photo:
+--   A) quickDevelopAdjustImage alone on the reset photo (no auto in play).
+--   B) auto preset -> wait for resolution -> absolute write of
+--      Exposure2012 = auto + 0.5 via applyDevelopSettings.
 -- Remove this file (and its Info.lua entry) once resolved.
 local LrApplication = import 'LrApplication'
 local LrDialogs = import 'LrDialogs'
@@ -18,13 +22,10 @@ local function exposureOf(photo)
     return s.Exposure2012
 end
 
--- The AutoTone placeholder is -999999; any sane exposure is within ±100.
 local function isResolved(v)
     return v ~= nil and v > -100 and v < 100
 end
 
--- Polls until the stored exposure is a real (non-placeholder) value.
--- Returns value, secondsWaited, resolvedBoolean.
 local function waitForResolved(photo, maxSeconds)
     local waited = 0
     while waited < maxSeconds do
@@ -49,48 +50,59 @@ LrFunctionContext.postAsyncTaskWithContext('autoOffsetDiag', function(context)
 
     local before = exposureOf(photo)
 
-    -- Step 1: auto preset in its own transaction
-    catalog:withWriteAccessDo('Diag: Auto Tone only', function()
+    -- Experiment A: quickDevelopAdjustImage alone, no auto involved.
+    catalog:withWriteAccessDo('Diag A: quickDev only', function()
+        photo:quickDevelopAdjustImage('Exposure', 0.5)
+    end, { timeout = 15 })
+    LrTasks.sleep(1)
+    local afterQuickDev = exposureOf(photo)
+
+    -- Experiment B: auto preset, wait for resolution, absolute write.
+    catalog:withWriteAccessDo('Diag B1: Auto Tone', function()
         photo:applyDevelopPreset(DevelopLogic.getAutoTonePreset(), _PLUGIN)
     end, { timeout = 15 })
 
-    -- Step 2: wait for the -999999 placeholder to resolve; if idle waiting
-    -- doesn't resolve it, request a thumbnail to force the develop engine
-    -- to render (and therefore compute) the auto settings.
     local autoValue, autoWait, resolved = waitForResolved(photo, 5)
-    local forcedRender = false
     if not resolved then
-        forcedRender = true
         photo:requestJpegThumbnail(320, 320, function() end)
         autoValue, autoWait, resolved = waitForResolved(photo, 10)
         autoWait = autoWait + 5
     end
 
-    -- Step 3: offset in its own transaction, only after resolution
-    catalog:withWriteAccessDo('Diag: Offset only', function()
-        photo:quickDevelopAdjustImage('Exposure', 0.5)
-    end, { timeout = 15 })
-    LrTasks.sleep(1)
-    local final = exposureOf(photo)
-
-    local verdict
-    if resolved and final ~= nil and math.abs(final - (autoValue + 0.5)) < 0.005 then
-        verdict = 'SUCCESS: final = auto + 0.5. Waiting for resolution fixes it.'
-    elseif not resolved then
-        verdict = 'Auto never resolved from the placeholder, even after forcing a render.'
-    else
-        verdict = 'Offset still lost or wrong even after resolution.'
+    local final = nil
+    if resolved then
+        catalog:withWriteAccessDo('Diag B2: absolute exposure write', function()
+            photo:applyDevelopSettings({ Exposure2012 = autoValue + 0.5 })
+        end, { timeout = 15 })
+        LrTasks.sleep(1)
+        final = exposureOf(photo)
     end
 
-    LrDialogs.message('Auto Offset Diagnostic v2',
+    local verdictA
+    if afterQuickDev ~= nil and before ~= nil
+            and math.abs(afterQuickDev - (before + 0.5)) < 0.005 then
+        verdictA = 'A: quickDevelopAdjustImage WORKS in isolation.'
+    else
+        verdictA = 'A: quickDevelopAdjustImage did NOT apply +0.5 in isolation.'
+    end
+
+    local verdictB
+    if not resolved then
+        verdictB = 'B: auto never resolved; absolute write not attempted.'
+    elseif final ~= nil and math.abs(final - (autoValue + 0.5)) < 0.005 then
+        verdictB = 'B: SUCCESS - absolute write after resolution gives auto + 0.5.'
+    else
+        verdictB = 'B: absolute write FAILED to stick.'
+    end
+
+    LrDialogs.message('Auto Offset Diagnostic v3',
         string.format(
-            'Before: %s\n' ..
-            'Auto resolved: %s (waited %.1fs%s)\n' ..
-            'After +0.5 offset: %s\n\n%s',
-            tostring(before),
-            tostring(autoValue), autoWait,
-            forcedRender and ', needed forced render' or '',
-            tostring(final),
-            verdict),
+            'Before (reset photo): %s\n' ..
+            'A) After quickDev +0.5 (no auto): %s\n' ..
+            'B) Auto resolved: %s (waited %.1fs)\n' ..
+            'B) After absolute write of auto+0.5: %s\n\n%s\n%s',
+            tostring(before), tostring(afterQuickDev),
+            tostring(autoValue), autoWait, tostring(final),
+            verdictA, verdictB),
         'info')
 end)
