@@ -43,6 +43,10 @@ LrFunctionContext.postAsyncTaskWithContext('autoOffset', function(context)
     local step = 0
 
     -- Pass 1: queue Auto Tone on every photo.
+    -- Counting semantics: "skipped" = untouched (videos, gate failures,
+    -- never reached); "autoOnly" = Auto Tone applied but offset never
+    -- written (cancel, resolution timeout, write failure); "processed" =
+    -- fully done.
     local queued, skipped = {}, 0
     for _, photo in ipairs(photos) do
         if progress:isCanceled() then
@@ -59,35 +63,49 @@ LrFunctionContext.postAsyncTaskWithContext('autoOffset', function(context)
         LrTasks.yield()
     end
 
+    -- Photos skipped (or never reached) in pass 1 take no pass-2 step;
+    -- shrink the denominator so the bar can reach 100%.
+    totalSteps = step + #queued
+
     -- Pass 2: wait for each photo's auto to resolve, then write auto + offset.
-    local processed = 0
-    for _, photo in ipairs(queued) do
-        if progress:isCanceled() then
-            break
+    local processed, autoOnly = 0, 0
+    if offset == 0 then
+        -- Nothing to write on top of Auto — queued photos are complete
+        -- as-is; no need to wait for resolution.
+        processed = #queued
+        step = step + #queued
+        if totalSteps > 0 then
+            progress:setPortionComplete(step, totalSteps)
         end
-        local ok, autoValue = LrTasks.pcall(
-            DevelopLogic.waitForAutoExposure, photo, RESOLVE_TIMEOUT_SECONDS)
-        if ok and autoValue ~= nil then
-            local written = true
-            if offset ~= 0 then
-                local ok2, result = LrTasks.pcall(
-                    DevelopLogic.applyExposure, catalog, photo, autoValue + offset)
-                written = ok2 == true and result == true
-            end
-            if written then
-                processed = processed + 1
+    else
+        for _, photo in ipairs(queued) do
+            if progress:isCanceled() then
+                -- Auto Tone is already queued on this photo; without the
+                -- offset write it must be reported, not silently dropped.
+                autoOnly = autoOnly + 1
             else
-                skipped = skipped + 1
+                local ok, autoValue = LrTasks.pcall(
+                    DevelopLogic.waitForAutoExposure, photo, RESOLVE_TIMEOUT_SECONDS)
+                local written = false
+                if ok and autoValue ~= nil then
+                    local ok2, result = LrTasks.pcall(
+                        DevelopLogic.applyExposure, catalog, photo, autoValue + offset)
+                    written = ok2 == true and result == true
+                end
+                if written then
+                    processed = processed + 1
+                else
+                    autoOnly = autoOnly + 1
+                end
+                step = step + 1
+                progress:setPortionComplete(step, totalSteps)
+                LrTasks.yield()
             end
-        else
-            skipped = skipped + 1
         end
-        step = step + 1
-        progress:setPortionComplete(step, totalSteps)
-        LrTasks.yield()
     end
     progress:done()
 
     LrDialogs.message('Auto Tone + Exposure Offset',
-        Helpers.formatSummary(processed, skipped), 'info')
+        Helpers.formatSummary(processed, skipped)
+            .. Helpers.formatAutoOnlyNote(autoOnly), 'info')
 end)

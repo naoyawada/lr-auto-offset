@@ -9,7 +9,7 @@ local DevelopLogic = {}
 -- (same as the Develop module's Auto button) when the preset is applied.
 local autoTonePreset
 
-function DevelopLogic.getAutoTonePreset()
+local function getAutoTonePreset()
     if autoTonePreset == nil then
         autoTonePreset = LrApplication.addDevelopPresetForPlugin(
             _PLUGIN, 'Auto Tone (lr-auto-offset)', { AutoTone = true })
@@ -27,7 +27,11 @@ local function exposureOf(photo)
 end
 
 -- Pass 1: queue Auto Tone. Lightroom writes a -999999 placeholder into
--- Exposure2012 and computes the real auto values asynchronously.
+-- Exposure2012 synchronously within this gate (verified empirically on
+-- LR Classic v13) and computes the real auto values asynchronously.
+-- waitForAutoExposure relies on that synchronous placeholder write: if a
+-- future LR version deferred it, a stale pre-auto exposure could be
+-- mistaken for a resolved auto value.
 -- Returns true if applied, false if skipped (videos) or the write gate
 -- couldn't be acquired.
 function DevelopLogic.applyAutoTone(catalog, photo)
@@ -36,7 +40,7 @@ function DevelopLogic.applyAutoTone(catalog, photo)
     end
 
     local status = catalog:withWriteAccessDo('Auto Tone (lr-auto-offset)', function()
-        photo:applyDevelopPreset(DevelopLogic.getAutoTonePreset(), _PLUGIN)
+        photo:applyDevelopPreset(getAutoTonePreset(), _PLUGIN)
     end, { timeout = 15 })
 
     return status == 'executed'
@@ -48,6 +52,9 @@ end
 -- Returns the resolved auto exposure, or nil on timeout.
 function DevelopLogic.waitForAutoExposure(photo, maxSeconds)
     local waited = 0
+    -- The handle must stay referenced for the whole wait: the SDK may
+    -- cancel the render if the request object is garbage-collected.
+    local thumbnailRequest = nil
     local renderRequested = false
     while waited < maxSeconds do
         local v = exposureOf(photo)
@@ -56,11 +63,13 @@ function DevelopLogic.waitForAutoExposure(photo, maxSeconds)
         end
         if not renderRequested and waited >= maxSeconds / 2 then
             renderRequested = true
-            photo:requestJpegThumbnail(320, 320, function() end)
+            thumbnailRequest = photo:requestJpegThumbnail(320, 320, function() end)
         end
         LrTasks.sleep(0.2)
         waited = waited + 0.2
     end
+    -- Explicitly release the render request only now, at timeout.
+    thumbnailRequest = nil
     return nil
 end
 

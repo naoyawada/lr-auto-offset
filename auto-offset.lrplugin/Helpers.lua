@@ -27,6 +27,15 @@ function Helpers.isResolvedExposure(v)
     return type(v) == "number" and v == v and v > -100 and v < 100
 end
 
+-- Appended to the summary when photos got Auto Tone applied but the offset
+-- was never written (canceled mid-run, resolution timeout, or write failure).
+function Helpers.formatAutoOnlyNote(count)
+    if count <= 0 then
+        return ""
+    end
+    return string.format(", %d left with Auto Tone only", count)
+end
+
 -- Builds the end-of-run summary line, e.g. "40 photos processed, 2 skipped".
 function Helpers.formatSummary(processed, skipped)
     local summary = string.format("%d photo%s processed",

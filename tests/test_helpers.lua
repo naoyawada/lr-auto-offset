@@ -64,6 +64,12 @@ check("rejects nil exposure", Helpers.isResolvedExposure(nil), false)
 check("rejects NaN exposure", Helpers.isResolvedExposure(0 / 0), false)
 check("rejects non-number exposure", Helpers.isResolvedExposure("0.5"), false)
 
+-- formatAutoOnlyNote: appended when photos got Auto Tone but no offset
+check("no note when zero", Helpers.formatAutoOnlyNote(0), "")
+check("no note when negative", Helpers.formatAutoOnlyNote(-1), "")
+check("note for one", Helpers.formatAutoOnlyNote(1), ", 1 left with Auto Tone only")
+check("note for several", Helpers.formatAutoOnlyNote(3), ", 3 left with Auto Tone only")
+
 -- formatSummary
 check("plural summary", Helpers.formatSummary(42, 0), "42 photos processed")
 check("singular summary", Helpers.formatSummary(1, 0), "1 photo processed")
